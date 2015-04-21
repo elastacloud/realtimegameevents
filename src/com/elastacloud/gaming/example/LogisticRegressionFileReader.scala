@@ -3,7 +3,7 @@ package com.elastacloud.gaming.example
 import org.apache.spark.SparkContext
 import org.apache.spark.mllib.classification.LogisticRegressionWithSGD
 import org.apache.spark.mllib.linalg.Vectors
-import org.apache.spark.mllib.regression.{LabeledPoint, GeneralizedLinearModel}
+import org.apache.spark.mllib.regression.{GeneralizedLinearModel, LabeledPoint}
 import org.apache.spark.rdd.RDD
 
 class RegressionReader(context : SparkContext) extends ReaderBase {
@@ -18,7 +18,7 @@ class RegressionReader(context : SparkContext) extends ReaderBase {
       LabeledPoint(line._1.asInstanceOf[Double], Vectors.dense(line._2._1, line._2._2, line._2._3))
     }.cache()
 
-    (LogisticRegressionWithSGD.train(unscaledData, 100, 0.1), unscaledData)
+    (LogisticRegressionWithSGD.train(unscaledData, 20, 0.1), unscaledData)
 
   }
 

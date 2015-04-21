@@ -33,17 +33,20 @@ object ServiceBusConfiguration {
   val subscriptionName = "spark-livedata"
   val topicName = "gamingevents"
   val namespace = "sparkstreaming"
-  val sasOut = "SharedAccessSignature sr=https%3a%2f%2fsparkstreaming.servicebus.windows.net%2fgamingout&sig=YdxFy5Whh5tl2aKdGz%2bgmmWS5RiKJdFA1bP%2bnpZIN44%3d&se=1460833404&skn=sparkpol"
+  val sasOut = "sr=https%3a%2f%2fsparkstreaming.servicebus.windows.net%2fgamingout&sig=YPbqsKOmbmLBTZPDHz7j6EJAreCygX0ofU%2bhtJP8Phs%3d&se=1461079802&skn=sparkpol"
   val topicNameOut = "gamingout"
 }
 
 class ConfigureSteps {
+
+  var isClustered = true
 
   def createSparkStreaming(args : Array[String]) : StreamingContext = {
 
     // Always do for local to ensure that the Hadoop tools are set correctly
     if (args(0).contains("local")) {
       System.setProperty("hadoop.home.dir", args(1))
+      isClustered = false
     }
     // Set the Spark conf value which will tune the TTL value for streaming
     val conf = new SparkConf()
@@ -68,13 +71,17 @@ class ConfigureSteps {
   def trainModel(ssc : StreamingContext) = {
 
     val sqlContext = SQLContextSingleton.getInstance(ssc.sparkContext)
-    val jsonFile = sqlContext.jsonFile("D:\\Projects\\data").toDF()
+    val location = isClustered match {
+      case true => "/gamingin/*.json"
+      case _ => "D:\\Projects\\data"
+    }
+    val jsonFile = sqlContext.jsonFile(location).toDF()
     jsonFile.registerTempTable("gameevents")
-    val query = sqlContext.sql("select Message, LevelTimeRemaining, LevelScore, LevelCompleteness from gameevents where Message = 'Monetize' or Message='MonetizeDeclined'")
+    val query = sqlContext.sql("select Message, LevelTimeRemaining, LevelScore, LevelCompleteness from gameevents")
 
     val playerData = query.map { line =>
       val label = line(0) match {
-        case "Monetized" => 1D
+        case "Monetize" => 1D
         case _ => 0D
       }
       val levelTimeRemaining = line(1)
@@ -94,6 +101,7 @@ class ConfigureSteps {
   def processMesssages(gamingReader : ReceiverInputDStream[String], model : GeneralizedLinearModel) = {
 
     // enumerate RDDs so that you can enable the streaming capability
+
     gamingReader.foreachRDD { rdd =>
 
       // Get the singleton instance of SQLContext
@@ -111,7 +119,7 @@ class ConfigureSteps {
 
       // Do word count on DataFrame using SQL and print it
       val uidDataFrame =
-        sqlContext.sql("select Message, LevelTimeRemaining, LevelScore, LevelCompleteness, GameId, GamerId from gameevents where Message='Monetize' or Message='MonetizeDeclined'")
+        sqlContext.sql("select Message, LevelTimeRemaining, LevelScore, LevelCompleteness, GameId, GamerId from gameevents where not (Message='Monetize' or Message='MonetizeDeclined')")
       uidDataFrame.show()
       val vectorInput = uidDataFrame.map { row =>
         val levelTimeRemaining = row(1).asInstanceOf[Double]
@@ -121,7 +129,6 @@ class ConfigureSteps {
         val gamerId = row(5)
         (gameId, gamerId, Vectors.dense(levelTimeRemaining, levelScore, levelCompleteness))
       }
-
 
       val sender = new AzureServiceBusSession(ServiceBusConfiguration.namespace, ServiceBusConfiguration.topicNameOut, Some(ServiceBusConfiguration.subscriptionName), ServiceBusConfiguration.sasOut)
 
@@ -144,9 +151,6 @@ class ConfigureSteps {
     println("AUC: " + metrics.areaUnderROC())
 
   }
-
-
-
 }
 
 object Main {
@@ -158,7 +162,6 @@ object Main {
     val gamingReader = steps.createAzureStream(ssc)
     val model = steps.trainModel(ssc)
     steps.printModelAUC(model._1._1, model._2)
-
 
     steps.processMesssages(gamingReader, model._1._1)
 
